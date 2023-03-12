@@ -1,0 +1,343 @@
+if CLIENT then
+	killicon.AddFont( "sent_1187erl", "HL2MPTypeDeath", "3", Color( 255, 0, 0, 255 ) )
+	language.Add( "sent_1187erl", "Emplacement Rocket Launcher" )
+	surface.CreateFont( "1187ERL_Font", { font = "Terminal", size = 15, weight = 750, antialias = true, bold = true } )
+else util.AddNetworkString( "NET_1187ERL" ) end
+
+CreateConVar( "sk_lawemp_damage", "200", { FCVAR_ARCHIVE, FCVAR_SERVER_CAN_EXECUTE, FCVAR_REPLICATED } )
+CreateConVar( "sk_lawemp_disposable", "0", { FCVAR_ARCHIVE, FCVAR_SERVER_CAN_EXECUTE, FCVAR_REPLICATED } )
+
+net.Receive( "NET_1187ERL", function() local ply = LocalPlayer()
+	local eid = math.Round( net.ReadFloat() )
+	if isnumber( eid ) and eid > 0 and IsValid( Entity( eid ) ) and Entity( eid ):GetClass() == "sent_1187erl" then
+		ply.ERL_Using = Entity( eid )
+	else ply.ERL_Using = nil end
+end )
+
+AddCSLuaFile()
+ENT.PrintName = "LAW Emplacement"
+ENT.Category = "Fun + Games"
+ENT.AutomaticFrameAdvance 	= true
+ENT.Base = "base_anim"  ENT.RenderGroup = RENDERGROUP_TRANSLUCENT
+ENT.Spawnable = true  ENT.AdminOnly = false
+
+function ENT:SpawnFunction( ply, tr, cls ) if !tr.Hit then return end
+	local ent = ents.Create( cls )  ent:SetPos( tr.HitPos )
+	ent:SetAngles( Angle( 0, ply:EyeAngles().Yaw, 0 ) )
+	ent:Spawn() return ent
+end
+function ENT:Initialize() if !SERVER then return end  if CurTime() == 0 then self:Remove() return end
+	self:SetModel( "models/weapons/w_1187law_turret.mdl" )  self:ResetSequence( self:LookupSequence( "idle_inactive" ) )
+	self:PhysicsInitBox( Vector( -25, -8, 0 ), Vector( 20, 8, 25 ) )  self:SetMoveType( MOVETYPE_NONE )
+	self:ERL_SetupData()  self:SetUseType( SIMPLE_USE )  self:SetCollisionGroup( COLLISION_GROUP_WEAPON )  self:Activate()
+end
+function ENT:Use( ply )
+	if self.ERL_BeforeUse > CurTime() or self:GetNWBool( "ERL_Disposed" ) or self:GetNWBool( "ERL_Disposed" ) or ( GetConVar( "sk_lawemp_disposable" ):GetInt() > 0 and !self:GetNWBool( "ERL_Filled" ) ) then return end
+	if self.ERL_BeingUse and IsValid( ply:GetNWEntity( "ERL_Using" ) ) then local timername = "["..self:EntIndex().."]erl_quit"
+		ply:SetNWEntity( "ERL_Using", nil )
+		net.Start( "NET_1187ERL" )
+		net.WriteFloat( 0 )
+		net.Send( ply )
+		if IsValid( self.ERL_LastWeapon ) and self.ERL_LastWeapon.Owner == ply then
+			ply:SelectWeapon( self.ERL_LastWeapon )  self.ERL_LastWeapon = nil
+		end ply:CrosshairEnable()
+		self:StopSound( "Func_Tank.BeginUse" )  self:StopSound( "Weapon_AR2.NPC_Reload" )
+	elseif !self.ERL_BeingUse then timer.Remove( "["..self:EntIndex().."]erl_quit" )
+		local EA = self:EyeAngles()
+		local boxA = self:GetPos() +EA:Forward()*-82 +EA:Right()*-32 +EA:Up()*-64
+		local boxB = self:GetPos() +EA:Forward()*-18 +EA:Right()*32 +EA:Up()*64
+		local _, angL = WorldToLocal( Vector( 0, 0, 0 ), self:GetAngles(), Vector( 0, 0, 0 ), ply:EyeAngles() )
+		local posL = self:WorldToLocal( ply:GetPos() )
+		local bool1 = ( math.abs( math.sqrt( angL.Pitch^2 +angL.Yaw^2 ) ) <= 45 )
+		local bool2 = ply:GetPos():Distance( self:GetPos() ) <= 75
+		if bool1 and bool2 then self:EmitSound( "Func_Tank.BeginUse" )  self.ERL_User = ply  self.ERL_BeingUse = true
+			self.ERL_BeforeUse = CurTime() +1  ply:SetNWEntity( "ERL_Using", self )
+			self:ResetSequence( self:LookupSequence( "activate" ) )
+			if self:GetNWBool( "ERL_Guided" ) then self:ERL_ToggleLaser( true ) end  local eid = self:EntIndex()
+			net.Start( "NET_1187ERL" )
+			net.WriteFloat( eid )
+			net.Send( ply )
+			self.ERL_LastWeapon = ply:GetActiveWeapon()  ply:SetActiveWeapon( nil )
+			self.ERL_User:CrosshairDisable()
+		end
+	end
+end
+function ENT:Think()  self:NextThink( CurTime() + 0.01 )
+	if !SERVER then return true end
+	if IsValid( self.ERL_User ) and self.ERL_User:GetNWEntity( "ERL_Using" ) != self then self.ERL_User = nil end
+	if self.ERL_BeforeUse <= CurTime() then
+		if self.ERL_BeingUse then
+			if !IsValid( self.ERL_User ) or !self.ERL_User:Alive() or self.ERL_User:GetPos():Distance( self:GetPos() ) >= 100 or IsValid( self.ERL_User:GetActiveWeapon() )
+			or ( self:GetNWBool( "ERL_Disposed" ) and GetConVar( "sk_lawemp_disposable" ):GetInt() > 0 and !self:GetNWBool( "ERL_Filled" ) and !IsValid( self:GetNWEntity( "ERL_Rocket" ) ) ) then
+				if IsValid( self.ERL_User ) then
+					self.ERL_User:SetNWEntity( "ERL_Using", nil )
+					net.Start( "NET_1187ERL" )
+					net.WriteFloat( 0 )
+					net.Send( self.ERL_User )
+					if IsValid( self.ERL_LastWeapon ) and self.ERL_LastWeapon.Owner == self.ERL_User and !IsValid( self.ERL_User:GetActiveWeapon() ) then
+						self.ERL_User:SelectWeapon( self.ERL_LastWeapon )  self.ERL_LastWeapon = nil
+					end
+					self.ERL_User:CrosshairEnable()
+				end
+				self.ERL_User = nil  self.ERL_BeingUse = false  self.ERL_BeforeUse = CurTime() +1
+				self:SetNWInt( "ERL_Out", 0 )  self:SetNWInt( "ERL_Reloading", 0 )  self:ERL_ToggleLaser( false )
+				if IsValid( self:GetNWEntity( "ERL_Rocket" ) ) then self:SetNWEntity( "ERL_Rocket", Entity( 0 ) ) end
+				self:ResetSequence( self:LookupSequence( "retract" ) )
+				self:StopSound( "Func_Tank.BeginUse" )  self:StopSound( "Weapon_AR2.NPC_Reload" )
+			else  local _, angL = WorldToLocal( Vector( 0, 0, 0 ), self.ERL_User:EyeAngles(), Vector( 0, 0, 0 ), self:GetAngles() )
+				angL = Angle( math.Clamp( angL.Pitch, -35, 50 ), math.Clamp( angL.Yaw, -60, 60 ), 0 )
+				if AP != angL.Pitch or AY != angL.Yaw then
+					local AP = self.ERL_Pitch  local AY = self.ERL_Yaw
+					self.ERL_Pitch = ( math.Clamp( angL.Pitch - AP, -3, 3 ) + AP )
+					self.ERL_Yaw = ( math.Clamp( angL.Yaw - AY, -3, 3 ) + AY )
+					self:SetPoseParameter( "aim_pitch", math.Round( self.ERL_Pitch ) )
+					self:SetPoseParameter( "aim_yaw", math.Round( self.ERL_Yaw ) )
+				end
+				if self:GetNWInt( "ERL_Reloading" ) > 0 and self:GetNWInt( "ERL_Reloading" ) < CurTime() then self:SetNWInt( "ERL_Reloading", 0 )
+					if self.ERL_User:GetAmmoCount( "RPG_Round" ) > 0 then
+						self.ERL_User:RemoveAmmo( 1, "RPG_Round" )  self:SetNWBool( "ERL_Filled", true )
+						if self:GetNWBool( "ERL_Guided" ) then self:ERL_ToggleLaser( true ) end
+					end
+				end
+			end
+		end
+	end
+	if IsValid( self:GetNWEntity( "ERL_Rocket" ) ) and self:GetNWBool( "ERL_Guided" ) then  local gd = self:GetNWEntity( "ERL_Rocket" )
+		local att = self:GetAttachment( self:LookupAttachment( "light" ) )
+		local tr = util.TraceHull( {
+			start = att.Pos, endpos = att.Pos +att.Ang:Forward()*100000, filter = { self, gd, self.ERL_User },
+			mins = Vector( -1, -1, -1 ), maxs = Vector( 1, 1, 1 ), mask = MASK_SHOT_HULL
+		} )  local hp = tr.HitPos  local nm = tr.HitNormal
+		local angL = ( ( hp -nm ) -gd:GetPos() ):Angle()  gd:SetAngles( angL ) gd:SetVelocity( -gd:GetVelocity() +angL:Forward():GetNormal()*2000 )
+	end
+	return true
+end
+function ENT:OnRemove()
+	timer.Remove( "["..self:EntIndex().."]erl_effect" )  timer.Remove( "["..self:EntIndex().."]erl_autoload" )
+	timer.Remove( "["..self:EntIndex().."]erl_quit" )  self:StopSound( "Func_Tank.BeginUse" )  self:StopSound( "Weapon_AR2.NPC_Reload" )
+	if IsValid( self.ERL_User ) then
+		if IsValid( self.ERL_LastWeapon ) and self.ERL_LastWeapon.Owner == self.ERL_User then
+			self.ERL_User:SelectWeapon( self.ERL_LastWeapon )  self.ERL_LastWeapon = nil
+		end
+		self.ERL_User:SetNWEntity( "ERL_Using", nil )
+		net.Start( "NET_1187ERL" )
+		net.WriteFloat( 0 )
+		net.Send( self.ERL_User )
+		self.ERL_User:CrosshairEnable()
+	end  self:ERL_SetupData()
+end
+function ENT:OnDuplicated() self:ERL_SetupData() end
+function ENT:OnRestore() self:ERL_SetupData() end
+function ENT:Draw() if self:GetModel() == "models/error.mdl" then self:SetModel( "models/props_combine/bunker_gun01.mdl" ) end self:DrawModel() end
+
+function ENT:ERL_SetupData()  if !SERVER then return end
+	if IsValid( self.ERL_User ) and self.ERL_User:GetNWEntity( "ERL_Using" ) == self then self.ERL_User:SetNWEntity( "ERL_Using", nil ) end
+	self.ERL_User = nil  self.ERL_BeingUse = false  self.ERL_Pitch = 0  self.ERL_Yaw = 0  self.ERL_BeforeUse = 0
+	self:SetNWInt( "ERL_Reloading", 0 )  self:SetNWInt( "ERL_Out", 0 )  self:SetNWBool( "ERL_Filled", true )
+	self:SetNWEntity( "ERL_Rocket", nil )  self:SetNWBool( "ERL_Effect", false )  self:SetNWBool( "ERL_Guided", false )
+	self.ERL_LastWeapon = nil self:SetNWBool( "ERL_Disposed", false )
+end
+function ENT:ERL_ToggleLaser( bool )  if !SERVER then return end  local timername = "["..self:EntIndex().."]erl_effect"
+	self:SetNWBool( "ERL_Effect", bool )  timer.Remove( timername )  if bool then
+		timer.Create( timername, FrameTime()*10, 1, function()
+			if IsValid( self ) and self:GetNWBool( "ERL_Effect" ) then
+				local eff = EffectData()  eff:SetEntity( self )  util.Effect( "ERL_LaserGuide", eff )
+			end
+		end )  self:EmitSound( "Weapon_ERL.LaserOn" )
+	else self:EmitSound( "Weapon_ERL.LaserOff" ) end
+end
+function ENT:ERL_Reload()  if !SERVER or ( GetConVar( "sk_lawemp_disposable" ):GetInt() > 0 ) then return end
+	if !self.ERL_BeingUse or self.ERL_BeforeUse > CurTime() or !IsValid( self.ERL_User ) or !self.ERL_User:Alive()
+	or self.ERL_User:GetAmmoCount( "RPG_Round" ) <= 0 or self:GetNWBool( "ERL_Filled" ) or self:GetNWInt( "ERL_Out" ) > CurTime()
+	or self:GetNWInt( "ERL_Reloading" ) > CurTime() then return end  self:SetNWInt( "ERL_Reloading", CurTime() + 3 )
+	self:EmitSound( "Weapon_AR2.NPC_Reload" )  self:ERL_ToggleLaser( false )
+end
+
+local ERL_DrawVM = false
+hook.Add( "HUDPaint", "ERL_DrawInfo", function()  local ply = LocalPlayer()
+	local emp = ply.ERL_Using  if IsValid( emp ) then
+		if !ERL_DrawVM then ERL_DrawVM = true  ply:DrawViewModel( false ) end
+		local att = emp:GetAttachment( emp:LookupAttachment( "muzzle" ) )
+		
+		local func = function( ent ) if ent == ply or ent == emp or ( ent.Owner == ply and ent:GetClass() == "rpg_missile" ) then return false end return true end
+		local tr = util.TraceLine( { start = att.Pos, endpos = att.Pos +att.Ang:Forward()*100000,
+		filter = func, mask = MASK_SHOT_HULL } )
+		
+		local hp = tr.HitPos  local np = tr.HitNormal  local scr = ( tr.HitPos + tr.HitNormal ):ToScreen()
+		scr.x = math.Round( scr.x )  scr.y = math.Round( scr.y )
+		local out = math.Clamp( emp:GetNWInt( "ERL_Out" ) -CurTime(), 0, 0.5 )
+		local rel = math.Clamp( emp:GetNWInt( "ERL_Reloading" ) -CurTime(), 0, 3 )
+		local las = emp:GetNWBool( "ERL_Guided" )  local gud = emp:GetNWEntity( "ERL_Rocket" )
+		local fil = emp:GetNWBool( "ERL_Filled" )  local col = Color( 255, 255, 255 )
+		if gud:IsValid() and gud != Entity( 0 ) then col = Color( 255, 255, 55 ) elseif !fil then col = Color( 255, 55, 55 ) end
+		
+		if ( fil or IsValid( gud ) ) or !emp:GetNWBool( "ERL_Disposed" ) then
+			surface.SetDrawColor( 0, 0, 0, 255 )  local function MakeItNice( x, y, w, h )
+				draw.RoundedBox( 0, x, y, w, h, col )
+				surface.SetDrawColor( 0, 0, 0, 255 )
+				surface.DrawOutlinedRect( x, y, w, h, 1 )
+			end
+			MakeItNice( scr.x -18 -out*18, scr.y -2, 15, 3 )
+			MakeItNice( scr.x +3 +out*18, scr.y -2, 15, 3 )
+			MakeItNice( scr.x -2, scr.y -18 -out*18, 3, 15 )
+			MakeItNice( scr.x -2, scr.y +3 +out*18, 3, 15 )
+			if las then MakeItNice( scr.x -2, scr.y -2, 4, 4 ) end
+			if GetConVar( "sk_lawemp_disposable" ):GetInt() <= 0 then
+				if rel <= 0 then local co2 = Color( 255, 255, 255 )
+					if ply:GetAmmoCount( "RPG_Round" ) <= 0 then co2 = Color( 255, 55, 55 ) end
+					draw.TextShadow( {
+						text = "AMMO:"..ply:GetAmmoCount( "RPG_Round" ),
+						pos = { scr.x, scr.y +out*18 +30 },
+						font = "1187ERL_Font",
+						xalign = TEXT_ALIGN_CENTER,
+						yalign = TEXT_ALIGN_CENTER,
+						color = co2
+					}, 1, 255 )
+				else
+					surface.SetFont( "1187ERL_Font" )  local sx, sy = surface.GetTextSize( "RELOADING" )
+					local per = math.Clamp( rel/3, 0, 1 )
+					draw.TextShadow( {
+						text = "RELOADING",
+						pos = { scr.x, scr.y +out*18 +30 },
+						font = "1187ERL_Font",
+						xalign = TEXT_ALIGN_CENTER,
+						yalign = TEXT_ALIGN_CENTER,
+						color = Color( 255, 255, 255 )
+					}, 1, 255 )
+					render.SetScissorRect( scr.x -5 -sx/2 +( sx +10 )*(1-per), scr.y +sy +5, scr.x +sx +5, scr.y +sy +15 +5, true )
+					draw.TextShadow( {
+						text = "RELOADING",
+						pos = { scr.x, scr.y +out*18 +30 },
+						font = "1187ERL_Font",
+						xalign = TEXT_ALIGN_CENTER,
+						yalign = TEXT_ALIGN_CENTER,
+						color = Color( 255, 55, 55 )
+					}, 1, 255 )
+					render.SetScissorRect( 0, 0, 0, 0, false )
+				end
+			end
+		end
+	elseif ERL_DrawVM then ERL_DrawVM = false  ply:DrawViewModel( true ) end
+end )
+hook.Add( "StartCommand", "ERL_UseCmd", function( ply, cmd )
+	if SERVER and ply:Alive() and IsValid( ply:GetNWEntity( "ERL_Using" ) ) then  local emp = ply:GetNWEntity( "ERL_Using" )
+		if !IsValid( emp.ERL_User ) or emp.ERL_User != ply then ply:SetNWEntity( "ERL_Using", nil )
+		elseif emp:GetNWInt( "ERL_Reloading" ) <= CurTime() -0.1 and emp:GetNWInt( "ERL_Out" ) <= CurTime() and !emp:GetNWBool( "ERL_Disposed" )
+		and !timer.Exists( "["..emp:EntIndex().."]erl_autoload" ) and !IsValid( ply:GetActiveWeapon() ) and !IsValid( emp:GetNWEntity( "ERL_Rocket" ) ) then
+			local timername = "["..emp:EntIndex().."]erl_autoload"  if ply:KeyPressed( IN_ATTACK ) then
+				if emp:GetNWBool( "ERL_Filled" ) then  local att = emp:GetAttachment( emp:LookupAttachment( "muzzle" ) )  emp:EmitSound( "Weapon_RPG.NPC_Single" )
+				emp:SetNWInt( "ERL_Out", CurTime() + 0.5 )
+				local rpg = ents.Create( "rpg_missile" ) rpg:SetPos( att.Pos +att.Ang:Forward()*20 ) rpg:SetAngles( att.Ang ) rpg:SetOwner( ply )
+				rpg:Spawn() rpg:SetModel( "models/weapons/w_1187missile.mdl" ) rpg:Activate() rpg:SetVelocity( att.Ang:Forward()*1000 ) rpg:SetGravity( 0 )
+				emp:ResetSequence( emp:LookupSequence( "fire" ) )  local bol = ( GetConVar( "sk_lawemp_disposable" ):GetInt() > 0 )
+				if bol then emp:SetNWBool( "ERL_Disposed", true ) end
+				timer.Simple( FrameTime(), function()
+					if IsValid( emp ) then
+						local data = EffectData()
+						data:SetEntity( emp )
+						data:SetOrigin( att.Pos )
+						data:SetAngles( att.Ang )
+						data:SetNormal( att.Ang:Forward() )
+						data:SetScale( 1 )
+						data:SetMagnitude( 1 )
+						data:SetRadius( 1 )
+						data:SetAttachment( emp:LookupAttachment( "muzzle" ) )
+						util.Effect( "MuzzleEffect", data )
+						if bol then util.Effect( "ERL_HaveUsed", data ) end						
+					end
+				end )
+				if emp:GetNWBool( "ERL_Guided" ) then emp:SetNWEntity( "ERL_Rocket", rpg ) end emp:SetNWBool( "ERL_Filled", false )
+				local con = GetConVar( "sk_lawemp_damage" ) if con != nil then rpg:SetSaveValue( "m_fldamage", con:GetInt() ) end
+				else  emp:EmitSound( "Weapon_AR2.Empty" )  emp:SetNWInt( "ERL_Out", CurTime() +0.25 )
+					timer.Create( timername, 0.3, 1, function()
+						if IsValid( emp ) and IsValid( emp.ERL_User ) and emp.ERL_User:GetNWEntity( "ERL_Using" ) == emp then
+							emp:ERL_Reload()
+						end
+					end )
+				end
+			end
+			if ply:KeyPressed( IN_ATTACK2 ) then local gd = emp:GetNWBool( "ERL_Guided" )
+				if !gd then emp:EmitSound( "Weapon_RPG.LaserOn" ) else emp:EmitSound( "Weapon_RPG.LaserOff" ) end emp:SetNWBool( "ERL_Guided", !gd ) emp:ERL_ToggleLaser( !gd )
+				emp:SetNWInt( "ERL_Out", CurTime() +0.25 )
+			end
+			if ply:KeyPressed( IN_RELOAD ) and !emp:GetNWBool( "ERL_Filled" ) then emp:ERL_Reload() end
+		end
+	end
+end )
+
+if CLIENT then
+	if true then
+		local EFFECT = {}
+		function EFFECT:Init( data )  self.Owner = data:GetEntity() end
+		function EFFECT:Think()  local own = self.Owner
+			if IsValid( own ) and own:GetNWBool( "ERL_Guided" ) and own:GetNWBool( "ERL_Effect" ) then
+				local att = own:GetAttachment( own:LookupAttachment( "light" ) )
+				self.Trace = util.TraceLine( {
+					start = att.Pos,
+					endpos = att.Pos +att.Ang:Forward()*100000,
+					filter = own,
+					mask = MASK_SHOT
+				} )
+				self:SetRenderBoundsWS( self.Trace.StartPos, self.Trace.HitPos )
+				return true
+			end
+			return false
+		end
+		local Mat = Material( "sprites/redglow1" )
+		function EFFECT:Render()
+			local own = self.Owner
+			if IsValid( own ) and self.Trace != nil then
+				local tr = self.Trace
+				local alp = 200 + math.abs( math.sin( CurTime() * 10 ) )*55
+				render.SetMaterial( Mat )  local size = 15 +math.abs( math.sin( CurTime() * 25 ) )*5
+				render.DrawSprite( tr.HitPos +tr.HitNormal, 10, 10, Color( 255, 0, 0, 255, 155 +math.abs( math.sin( CurTime() * 25 ) )*100 ) )
+			end
+		end
+		effects.Register( EFFECT, "ERL_LaserGuide" )
+	end
+	if true then
+		local EFFECT = {}
+		function EFFECT:Init( data ) 	
+			local ent = data:GetEntity()
+			if !IsValid( ent ) then return end
+			self.Owner = ent
+			self.Emitter = ParticleEmitter( self.Owner:GetPos() ) 
+		end
+		function EFFECT:Think()
+			local own = self.Owner
+			if IsValid( own ) then
+				local pos = own:GetPos()
+				local att = own:LookupAttachment( "muzzle" )
+				if att then pos = own:GetAttachment( att ).Pos end
+				self.Emitter:SetPos( pos )
+				if own:GetNWBool( "ERL_Disposed" ) and LocalPlayer():GetPos():DistToSqr( own:GetPos() ) <= 1000000 then
+					local particle = self.Emitter:Add( "particle/particle_noisesphere", pos )
+					if particle then
+						particle:SetVelocity( VectorRand():GetNormal()*5 )
+						particle:SetLifeTime( 0 )
+						particle:SetDieTime( 1 )
+						particle:SetStartAlpha( 255 )
+						particle:SetEndAlpha( 0 )
+						particle:SetStartSize( 2 )
+						particle:SetEndSize( 8 )
+						particle:SetAngles( Angle( 0, 0, 0 ) )
+						particle:SetAngleVelocity( Angle( 0, 0, 0 ) )
+						particle:SetRoll( math.Rand( 0, 360 ) )
+						
+						particle:SetColor( 155, 155, 155, 150 )
+						particle:SetGravity( Vector( 0, 0, 30 ) )
+						particle:SetAirResistance( 0 )
+						particle:SetCollide( false )
+						particle:SetBounce( 0 )
+					end
+				end
+				return true
+			end
+			
+			if self.Emitter then self.Emitter:Finish() end
+			return false
+		end
+		function EFFECT:Render() end
+		effects.Register( EFFECT, "ERL_HaveUsed" )
+	end
+end
